@@ -120,236 +120,145 @@ code{font-family:var(--mono);font-size:12px;background:var(--bg);padding:1px 5px
 .notice{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--brass);border-radius:8px;padding:12px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
 .notice p{margin:0;min-width:0;flex:1 1 260px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+.who{font-size:12.5px;color:var(--muted);white-space:nowrap}
+.who b{color:var(--ink);font-weight:600}
+.role{display:inline-block;font-size:11.5px;font-weight:600;border-radius:4px;padding:1px 7px;margin-left:4px;background:var(--accent-soft);color:var(--accent)}
+.role.admin{background:var(--warn-soft);color:var(--brass)}
+.authwrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.authbox{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;width:100%;max-width:380px;display:flex;flex-direction:column;gap:12px}
+.authbox h1{margin:0;font-size:20px}
+.authbox label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.authbox .err{color:var(--crit);font-size:12.5px;min-height:1em;margin:0}
+.authbox .actions{justify-content:flex-end}
+.temp{font-family:var(--mono);font-size:20px;letter-spacing:.06em;background:var(--bg);border:1px dashed var(--line);border-radius:6px;padding:10px;text-align:center;user-select:all}
+button:disabled,input:disabled,select:disabled{opacity:.6;cursor:not-allowed}
 </style>
 
+<div id="auth" class="authwrap" hidden></div>
+<div id="app" hidden>
 <header class="top"><div class="wrap">
   <div class="brand"><b>OTA 盯盘台</b><span>示例酒店 · 选住云管家 + 携程 / 美团 / 飞猪</span></div>
   <div class="hdr-right">
     <span class="clock" id="clock"></span>
     <span class="clock" id="lastScan"></span>
-    <button class="primary" id="scanBtn">模拟一次巡检</button>
+    <button class="primary" id="scanBtn" hidden>模拟一次巡检</button>
+    <span class="who" id="who"></span>
+    <button class="small" id="pwBtn">修改密码</button>
+    <button class="small" id="logoutBtn">退出</button>
   </div>
 </div></header>
-<div class="mockbar"><div class="wrap">框架演示：所有房态、价格、订单、点评均为模拟数据，未连接选住云管家或任何 OTA，操作不会影响真实房态。</div></div>
+<div class="mockbar"><div class="wrap">账号、角色、二次验证和操作记录是真实功能；房态、价格、订单、点评仍是模拟数据，未连接选住云管家或任何 OTA。</div></div>
 <nav class="tabs" aria-label="功能"><div class="wrap" id="tabs"></div></nav>
 <main><div class="wrap" id="view"></div></main>
+</div>
 <div id="modalRoot"></div>
 
 <script>
-/* ================= 基础数据（模拟） ================= */
-const CH=[{id:'ctrip',name:'携程'},{id:'meituan',name:'美团'},{id:'fliggy',name:'飞猪'}];
-const RT=[
-  {id:'K',name:'高级大床房',total:30,base:398,floor:328,cap:688},
-  {id:'T',name:'高级双床房',total:25,base:418,floor:338,cap:698},
-  {id:'D',name:'豪华大床房',total:15,base:528,floor:438,cap:888},
-  {id:'S',name:'行政套房',total:6,base:888,floor:728,cap:1588}];
-const DAYS=14;
-const thr={spreadPct:3,spreadAbs:10,reopenMin:3,compPct:10,urgentMin:10,importantMin:60,autoCloseMin:20,autoClose:true,orderMin:10};
-let seed=20261027;
-function rnd(){seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;}
-const today=new Date();today.setHours(0,0,0,0);
-const WK='日一二三四五六';
-function dayDate(i){const d=new Date(today);d.setDate(d.getDate()+i);return d;}
-function dayLabel(i){const d=dayDate(i);return i===0?`今天 ${d.getMonth()+1}/${d.getDate()}`:`${d.getMonth()+1}/${d.getDate()} 周${WK[d.getDay()]}`;}
-function isWeekend(i){const g=dayDate(i).getDay();return g===5||g===6;}
-function price8(x){return Math.round(x/10)*10-2;}
-function rtOf(id){return RT.find(r=>r.id===id);}
-function chName(id){return CH.find(c=>c.id===id).name;}
-function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function hhmm(d){return d.toTimeString().slice(0,5);}
-
-/* 模拟库存：inv[房型][天] = {pms 可售, ch:{渠道:{open,qty,price}}} */
-const inv={};
-RT.forEach(rt=>{inv[rt.id]=[];for(let i=0;i<DAYS;i++){
-  const occ=0.45+rnd()*0.35+(isWeekend(i)?0.12:0)-(i>7?0.15:0);
-  const pms=Math.max(0,Math.round(rt.total*(1-Math.min(occ,0.98))));
-  const p=price8(rt.base*(isWeekend(i)?1.15:1));
-  const ch={};CH.forEach(c=>{const q=Math.min(pms,c.id==='ctrip'?5:3);ch[c.id]={open:q>0,qty:q,price:p};});
-  inv[rt.id].push({pms,ch});}});
-// 注入几种典型异常，便于演示
-(function(){
-  const k=inv.K[0];k.pms=1;k.ch.ctrip={...k.ch.ctrip,open:true,qty:3};k.ch.meituan={...k.ch.meituan,open:true,qty:1};k.ch.fliggy={...k.ch.fliggy,open:true,qty:1};
-  const t=inv.T[2];t.pms=Math.max(t.pms,9);t.ch.ctrip={...t.ch.ctrip,open:true,qty:5};t.ch.meituan={...t.ch.meituan,open:true,qty:3};t.ch.fliggy={...t.ch.fliggy,open:false,qty:0};
-  const d=inv.D[0];d.pms=Math.max(d.pms,4);CH.forEach(c=>{d.ch[c.id]={...d.ch[c.id],open:true,qty:Math.min(d.pms,3)};});d.ch.meituan.price=199;
-  const k5=inv.K[5];k5.pms=Math.max(k5.pms,6);CH.forEach(c=>{k5.ch[c.id]={...k5.ch[c.id],open:true,qty:3};});k5.ch.fliggy.price=k5.ch.ctrip.price+40;
-  const s=inv.S[0];s.pms=0;CH.forEach(c=>{s.ch[c.id]={...s.ch[c.id],open:false,qty:0};});
-})();
-
-const comps=[
-  {name:'竞对 A · 同街精品酒店',dist:0.4,y:428,t:428,full:false},
-  {name:'竞对 B · 连锁中高端',dist:0.9,y:388,t:448,full:false},
-  {name:'竞对 C · 商务酒店',dist:1.2,y:358,t:358,full:false},
-  {name:'竞对 D · 设计酒店',dist:1.8,y:468,t:468,full:true},
-  {name:'竞对 E · 连锁经济型',dist:2.3,y:338,t:328,full:false},
-  {name:'竞对 F · 高端品牌',dist:2.9,y:518,t:518,full:false}];
-
-const orders=[
-  {no:'CT26102700187',ch:'携程',rt:'高级大床房',guest:'王**',stay:'今晚 1 晚',amt:398,status:'待确认',mins:12},
-  {no:'MT26102700342',ch:'美团',rt:'高级双床房',guest:'李**',stay:'今晚 2 晚',amt:836,status:'已确认',mins:35},
-  {no:'FZ26102700051',ch:'飞猪',rt:'豪华大床房',guest:'陈**',stay:'明晚 1 晚',amt:528,status:'待确认',mins:4},
-  {no:'CT26102600954',ch:'携程',rt:'行政套房',guest:'赵**',stay:'今晚 1 晚',amt:888,status:'已取消',mins:80},
-  {no:'MT26102700310',ch:'美团',rt:'高级大床房',guest:'周**',stay:'今晚 1 晚',amt:398,status:'未同步到 PMS',mins:18}];
-const reviews=[
-  {id:1,ch:'美团',score:2,text:'卫生间有异味，晚上前台处理很慢。',time:'今天 07:42',status:'open',draft:''},
-  {id:2,ch:'携程',score:5,text:'位置方便，早餐不错，前台小姐姐很热情。',time:'今天 06:15',status:'open',draft:''},
-  {id:3,ch:'飞猪',score:3,text:'房间干净，但隔音一般，能听到走廊声音。',time:'昨天 22:30',status:'open',draft:''}];
-
-/* ================= 数据适配器（以后在这里换成真实接口） ================= */
-const adapters={
-  pms:{name:'选住云管家',use:'可售房、在住、维修房、PMS 订单',mode:'模拟数据',api:'getAvailability(房型, 日期)',
-       getAvailability:(rt,di)=>inv[rt][di].pms},
-  ota:{name:'携程 / 美团 / 飞猪',use:'房态房价读写、订单、点评',mode:'模拟数据',api:'read(渠道) · push(渠道, 房型, 日期, 变更)',
-       read:(ch,rt,di)=>inv[rt][di].ch[ch],
-       push:(ch,rt,di,patch)=>{Object.assign(inv[rt][di].ch[ch],patch);return {ok:true};}},
-  comp:{name:'竞对价格服务',use:'竞对公开价、满房状态',mode:'模拟数据',api:'getRates(竞对列表)'},
-  notify:{name:'通知通道',use:'电话、企业微信、短信',mode:'演示：页面内提示',api:'send(级别, 内容, 接收人)'}};
-
 /* ================= 状态 ================= */
-let sugs=[],alerts=[],logs=[],sidN=0,aidN=0,lidN=0,scanN=0,lastScan=null;
+let me=null,S=null,U=null,skew=0,priceDay=0,modalOpen=false;
 let tab='overview';
 try{const t=localStorage.getItem('ota-tab');if(t)tab=t;}catch(e){}
 const KIND={close:'关房',reduce:'减房量',open:'开房',price:'调价'};
 const LVL={urgent:'紧急',important:'重要',normal:'提示'};
+const $=id=>document.getElementById(id);
 
-function addSug(o){
-  // 同一问题不重复推送：未处理、已驳回、已作废的不再提；已执行的只在问题再次出现时重新提醒
-  if(sugs.some(s=>s.key===o.key&&((s.status!=='done'&&s.status!=='failed')||o.key.startsWith('comp-'))))return false;
-  const s=Object.assign({id:'S'+(++sidN),created:new Date(),status:'pending'},o);
-  sugs.unshift(s);
-  addAlert(o.level,o.title,s.id);
-  return true;
-}
-function addAlert(level,text,sid,time){alerts.unshift({id:'A'+(++aidN),level,text,sid:sid||null,time:time||new Date(),status:'open'});}
-
-/* ================= 监控规则（建议引擎） ================= */
-function detect(){
-  let n=0;
-  RT.forEach(rt=>{for(let di=0;di<DAYS;di++){
-    const pms=adapters.pms.getAvailability(rt.id,di);
-    const ref=adapters.ota.read('ctrip',rt.id,di);
-    CH.forEach(c=>{
-      const s=adapters.ota.read(c.id,rt.id,di);
-      const where=`${rt.name} ${dayLabel(di)} · ${c.name}`;
-      if(s.open&&s.qty>pms){
-        const close=pms===0;
-        n+=addSug({key:`over-${rt.id}-${di}-${c.id}`,level:'urgent',kind:close?'close':'reduce',rt:rt.id,di,chs:[c.id],
-          title:`${where} 有超售风险`,patch:close?{open:false,qty:0}:{qty:pms},
-          before:`在售 ${s.qty} 间`,after:close?'关房':`在售 ${pms} 间`,editable:close?null:'qty',
-          reason:`选住云管家可售 ${pms} 间，${c.name}在售 ${s.qty} 间。`})?1:0;
-      }
-      if(!s.open&&pms>=thr.reopenMin){
-        const q=Math.min(pms,3);
-        n+=addSug({key:`reopen-${rt.id}-${di}-${c.id}`,level:'important',kind:'open',rt:rt.id,di,chs:[c.id],
-          title:`${where} 有空房但处于关房`,patch:{open:true,qty:q},before:'关房',after:`开房 · ${q} 间`,editable:'qty',
-          reason:`选住云管家可售 ${pms} 间，${c.name}未开房，可能错失订单。`})?1:0;
-      }
-      if(s.open&&(s.price<rt.floor||s.price>rt.cap)){
-        const to=ref&&c.id!=='ctrip'&&ref.price>=rt.floor&&ref.price<=rt.cap?ref.price:price8(rt.base*(isWeekend(di)?1.15:1));
-        n+=addSug({key:`abn-${rt.id}-${di}-${c.id}-${s.price}`,level:'urgent',kind:'price',rt:rt.id,di,chs:[c.id],
-          title:`${where} 价格异常 ¥${s.price}`,patch:{price:to},before:`¥${s.price}`,after:`¥${to}`,editable:'price',
-          reason:s.price<rt.floor?`低于底价 ¥${rt.floor}，疑似误操作。`:`高于封顶价 ¥${rt.cap}，疑似误操作。`})?1:0;
-      } else if(s.open&&c.id!=='ctrip'&&ref.open){
-        const diff=s.price-ref.price;
-        if(Math.abs(diff)/ref.price*100>thr.spreadPct&&Math.abs(diff)>thr.spreadAbs){
-          n+=addSug({key:`spread-${rt.id}-${di}-${c.id}-${s.price}`,level:'important',kind:'price',rt:rt.id,di,chs:[c.id],
-            title:`${where} 与携程价格不一致`,patch:{price:ref.price},before:`¥${s.price}`,after:`¥${ref.price}`,editable:'price',
-            reason:`携程 ¥${ref.price}，${c.name} ¥${s.price}，相差 ${diff>0?'+':''}${diff} 元，可能被判价格倒挂。`})?1:0;
-        }
-      }
-    });
-  }});
-  comps.forEach(cp=>{
-    const pct=(cp.t-cp.y)/cp.y*100;
-    if(pct>thr.compPct){
-      const rt=RT[0],cur=adapters.ota.read('ctrip',rt.id,0).price,to=Math.min(rt.cap,price8(cur*1.06));
-      if(to>cur){
-        n+=addSug({key:`comp-${cp.name}-${cp.t}`,level:'important',kind:'price',rt:rt.id,di:0,chs:CH.map(c=>c.id).filter(id=>adapters.ota.read(id,rt.id,0).open),
-          title:`${cp.name} 今日上调 ${pct.toFixed(0)}%`,patch:{price:to},before:`¥${cur}`,after:`¥${to}`,editable:'price',
-          reason:`竞对由 ¥${cp.y} 调到 ¥${cp.t}。建议${rt.name}今日全部已开渠道上调约 6%。`})?1:0;
-      }
-    }
-  });
-  lastScan=new Date();
-  return n;
-}
-
-/* 模拟巡检：轮流制造一种新情况 */
-function perturb(){
-  const step=scanN++%3, di=1+Math.floor(rnd()*5), rt=RT[Math.floor(rnd()*3)];
-  const cell=inv[rt.id][di];
-  if(step===0){const c=cell.ch.meituan;if(!c.open){c.open=true;c.qty=Math.min(cell.pms,2)||1;}c.price=cell.ch.ctrip.price+60;}
-  else if(step===1){const c=cell.ch.ctrip;c.open=true;c.qty=Math.max(c.qty,3);cell.pms=Math.max(0,c.qty-2);}
-  else{const cp=comps[2];cp.y=cp.t;cp.t=price8(cp.t*1.14);}
-}
-
-/* ================= 执行（确认后才调用） ================= */
-function snapshot(s){const o={};s.chs.forEach(id=>{o[id]={...inv[s.rt][s.di].ch[id]};});return o;}
+function can(p){return !!me&&me.perms.includes(p);}
+function now(){return Date.now()+skew;}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function hhmm(ms){return new Date(ms).toTimeString().slice(0,5);}
+function fullTime(ms){return new Date(ms).toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+const WK='日一二三四五六';
+function dayDate(i){const [y,m,d]=S.base.split('-').map(Number);return new Date(y,m-1,d+i);}
+function dayLabel(i){const d=dayDate(i);return i===0?`今天 ${d.getMonth()+1}/${d.getDate()}`:`${d.getMonth()+1}/${d.getDate()} 周${WK[d.getDay()]}`;}
+function rtOf(id){return S.rt.find(r=>r.id===id);}
+function chList(){return S.ch.map(([id,name])=>({id,name}));}
+function chName(id){return S.ch.find(c=>c[0]===id)[1];}
 function targetText(s){return `${rtOf(s.rt).name} · ${dayLabel(s.di)} · ${s.chs.map(chName).join('、')}`;}
-function execute(s,actor){
-  s.status='writing';s.stage=`正在写入${s.chs.map(chName).join('、')}…`;render();
-  setTimeout(()=>{
-    const snap=snapshot(s);
-    const results=s.chs.map(id=>adapters.ota.push(id,s.rt,s.di,s.patch));
-    s.stage='回读核对中…';render();
-    setTimeout(()=>{
-      const ok=results.every(r=>r.ok)&&s.chs.every(id=>Object.keys(s.patch).every(k=>adapters.ota.read(id,s.rt,s.di)[k]===s.patch[k]));
-      s.status=ok?'done':'failed';s.doneAt=new Date();
-      logs.unshift({id:'L'+(++lidN),time:new Date(),actor,action:KIND[s.kind],target:targetText(s),before:s.before,after:s.after,result:ok?'成功，回读一致':'失败，已告警',snap,rt:s.rt,di:s.di,rolledBack:false});
-      alerts.forEach(a=>{if(a.sid===s.id&&a.status==='open')a.status='done';});
-      if(!ok)addAlert('urgent',`写入失败：${targetText(s)}`);
-      toast(ok?'已写入渠道，回读核对一致':'回读不一致，已发紧急告警');
-      render();
-    },700);
-  },900);
+function minsSince(ms){return (now()-ms)/60000;}
+
+/* ================= 与后台通信 ================= */
+async function api(path,body,opts={}){
+  const init={credentials:'same-origin',headers:{}};
+  if(body!==undefined){init.method='POST';init.headers['Content-Type']='application/json';init.body=JSON.stringify(body);}
+  if(opts.poll)init.headers['X-Poll']='1';
+  let r;
+  try{r=await fetch('/api/'+path,init);}catch(e){throw new Error('连不上服务器，请检查网络');}
+  let d={};try{d=await r.json();}catch(e){}
+  if(r.status===401&&path!=='login'){me=null;showAuth('login',d.error);throw new Error(d.error||'请先登录');}
+  if(r.status===403&&d.mustChange){me.mustChange=true;showAuth('change');throw new Error(d.error);}
+  if(!r.ok)throw new Error(d.error||`请求失败（${r.status}）`);
+  return d;
 }
-function rollback(l){
-  Object.keys(l.snap).forEach(id=>adapters.ota.push(id,l.rt,l.di,l.snap[id]));
-  l.rolledBack=true;
-  logs.unshift({id:'L'+(++lidN),time:new Date(),actor:'管理者（演示）',action:'回滚',target:l.target,before:l.after,after:l.before,result:'成功，已恢复调整前的值',snap:null,rolledBack:true});
-  toast('已回滚到调整前的值');render();
+async function refresh(soft){
+  S=await api('state',undefined,{poll:soft});
+  skew=S.now-Date.now();
+  render(soft);
+}
+async function act(path,body){
+  try{const d=await api(path,body);toast(d.msg||'已完成');await refresh();return d;}
+  catch(e){toast(e.message);return null;}
 }
 
-/* 预置一条历史：系统紧急关房 */
-(function(){
-  const t=new Date(Date.now()-35*60000), s=inv.S[0].ch.meituan;
-  logs.push({id:'L'+(++lidN),time:t,actor:'系统 · 紧急关房',action:'关房',target:`行政套房 · ${dayLabel(0)} · 美团`,before:'在售 1 间',after:'关房',result:'成功，回读一致',snap:{meituan:{...s,open:true,qty:1}},rt:'S',di:0,rolledBack:false});
-  addAlert('urgent','行政套房今日已满房，美团 20 分钟无人确认，系统已紧急关房',null,t);
-})();
-
-/* ================= 定时：倒计时、升级、紧急关房 ================= */
-function minsSince(d){return (Date.now()-d.getTime())/60000;}
-function tick(){
-  sugs.forEach(s=>{
-    if(s.status!=='pending')return;
-    const m=minsSince(s.created), lim=s.level==='urgent'?thr.urgentMin:thr.importantMin;
-    if(m>lim&&!s.escalated){s.escalated=true;addAlert(s.level,`已升级代理审批人：${s.title}`,s.id);}
-    if(s.level==='urgent'&&(s.kind==='close'||s.kind==='reduce')&&thr.autoClose&&m>thr.autoCloseMin){
-      s.patch={open:false,qty:0};s.after='关房';s.kind='close';execute(s,'系统 · 紧急关房');
-    }
-    if(s.level==='important'&&m>240){s.status='expired';}
-  });
-  render(true);
+/* ================= 登录与修改密码 ================= */
+function showAuth(mode,msg){
+  modalOpen=false;$('modalRoot').innerHTML='';
+  $('app').hidden=true;$('auth').hidden=false;
+  if(mode==='login'){
+    $('auth').innerHTML=`<form class="authbox" id="loginForm">
+      <h1>OTA 盯盘台</h1><p class="note">请使用管理者分配给您的账号登录。</p>
+      <label for="lg-u">用户名<input id="lg-u" autocomplete="username" autocapitalize="off" required></label>
+      <label for="lg-p">密码<input id="lg-p" type="password" autocomplete="current-password" required></label>
+      <p class="err" id="lg-err">${esc(msg&&msg!=='请先登录'?msg:'')}</p>
+      <button class="primary" type="submit">登录</button></form>`;
+    $('lg-u').focus();
+  }else{
+    const forced=me&&me.mustChange;
+    $('auth').innerHTML=`<form class="authbox" id="pwForm">
+      <h1>修改密码</h1>
+      <p class="note">${forced?'这是您第一次登录（或密码刚被重置）。请把临时密码改成只有您自己知道的密码。':'修改后，您在其他设备上的登录会自动退出。'}</p>
+      <label for="pw-o">${forced?'临时密码':'当前密码'}<input id="pw-o" type="password" autocomplete="current-password" required></label>
+      <label for="pw-n">新密码（至少 8 位，建议字母加数字）<input id="pw-n" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label for="pw-n2">再输一次新密码<input id="pw-n2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <p class="err" id="pw-err"></p>
+      <div class="actions">${forced?'<button type="button" id="pwLogout">退出</button>':'<button type="button" id="pwCancel">取消</button>'}<button class="primary" type="submit">保存新密码</button></div></form>`;
+    $('pw-o').focus();
+  }
 }
+async function startApp(){
+  $('auth').hidden=true;$('app').hidden=false;
+  $('who').innerHTML=`<b>${esc(me.name)}</b><span class="role ${me.role}">${esc(me.roleName)}</span>`;
+  $('scanBtn').hidden=!can('scan');
+  if(!tabs().some(t=>t[0]===tab))tab='overview';
+  try{await refresh();if(tab==='users')loadUsers();}catch(e){toast(e.message);}
+}
+async function logout(){try{await api('logout',{});}catch(e){}me=null;S=null;U=null;showAuth('login');}
 
 /* ================= 视图 ================= */
-const TABS=[['overview','盯盘总览'],['queue','待确认'],['calendar','房态日历'],['price','价格与竞对'],['alerts','告警'],['orders','订单与点评'],['log','操作记录'],['settings','设置与数据源']];
-function pending(){return sugs.filter(s=>s.status==='pending'||s.status==='writing');}
+function tabs(){
+  const t=[['overview','盯盘总览'],['queue','待确认'],['calendar','房态日历'],['price','价格与竞对'],['alerts','告警'],['orders','订单与点评']];
+  if(can('log_all'))t.push(['log','操作记录']);else if(can('log_own'))t.push(['log','我的操作记录']);
+  t.push(['settings','设置与数据源']);
+  if(can('users'))t.push(['users','账号管理']);
+  return t;
+}
+function pending(){return S.sugs.filter(s=>s.status==='pending');}
 function renderTabs(){
-  const pc=pending().length, ac=alerts.filter(a=>a.status==='open'&&a.level==='urgent').length;
-  document.getElementById('tabs').innerHTML=TABS.map(([id,n])=>{
+  const pc=pending().length, ac=S.alerts.filter(a=>a.status==='open'&&a.level==='urgent').length;
+  $('tabs').innerHTML=tabs().map(([id,n])=>{
     const b=id==='queue'&&pc?`<span class="badge">${pc}</span>`:id==='alerts'&&ac?`<span class="badge">${ac}</span>`:'';
     return `<button role="tab" aria-selected="${tab===id}" data-tab="${id}">${n}${b}</button>`;}).join('');
 }
 function card(s){
-  const lim=s.level==='urgent'?thr.urgentMin:thr.importantMin, left=Math.ceil(lim-minsSince(s.created));
+  const lim=s.level==='urgent'?S.thr.urgentMin:S.thr.importantMin, left=Math.ceil(lim-minsSince(s.created));
   let due='';
   if(s.status==='pending')due=s.escalated?`<span class="due late">已超时 · 已升级代理审批人</span>`:`<span class="due">剩 ${Math.max(left,0)} 分钟</span>`;
   let foot='';
-  if(s.status==='pending')foot=`<div class="actions"><button class="primary" data-act="confirm" data-id="${s.id}">确认</button>${s.editable?`<button data-act="edit" data-id="${s.id}">修改后确认</button>`:''}<button class="danger" data-act="reject" data-id="${s.id}">驳回</button></div>`;
-  else if(s.status==='writing')foot=`<div class="stage">${esc(s.stage)}</div>`;
-  else if(s.status==='done')foot=`<div class="stage done">已执行 ${hhmm(s.doneAt)} · 回读一致</div>`;
+  if(s.status==='pending')foot=can('confirm')
+    ?`<div class="actions"><button class="primary" data-act="confirm" data-id="${s.id}">确认</button>${s.editable?`<button data-act="edit" data-id="${s.id}">修改后确认</button>`:''}<button class="danger" data-act="reject" data-id="${s.id}">驳回</button></div>`
+    :`<div class="stage">等待管理者确认</div>`;
+  else if(s.status==='done')foot=`<div class="stage done">已执行 ${hhmm(s.doneAt)} · ${esc(s.by)} · 回读一致</div>`;
   else if(s.status==='failed')foot=`<div class="stage bad">写入失败，已告警</div>`;
-  else if(s.status==='rejected')foot=`<div class="stage">已驳回：${esc(s.rejectReason)}</div>`;
+  else if(s.status==='rejected')foot=`<div class="stage">已驳回：${esc(s.rejectReason)} · ${esc(s.by)}</div>`;
   else if(s.status==='expired')foot=`<div class="stage">超时未处理，已作废</div>`;
   return `<article class="card ${s.level}">
     <div class="meta"><span class="lvl ${s.level}">${LVL[s.level]}</span><span>${KIND[s.kind]}</span><span>${hhmm(s.created)}</span>${due}</div>
@@ -359,10 +268,10 @@ function card(s){
 }
 function vOverview(){
   const p=pending(), urg=p.filter(s=>s.level==='urgent').length;
-  const openA=alerts.filter(a=>a.status==='open').length;
-  const sold=RT.reduce((a,r)=>a+(r.total-inv[r.id][0].pms),0), tot=RT.reduce((a,r)=>a+r.total,0);
-  const adr=Math.round(RT.reduce((a,r)=>a+inv[r.id][0].ch.ctrip.price*(r.total-inv[r.id][0].pms),0)/Math.max(sold,1));
-  const lastAuto=logs.find(l=>l.actor.startsWith('系统')&&!l.rolledBack&&l.action==='关房');
+  const openA=S.alerts.filter(a=>a.status==='open').length;
+  const sold=S.rt.reduce((a,r)=>a+(r.total-S.inv[r.id][0].pms),0), tot=S.rt.reduce((a,r)=>a+r.total,0);
+  const adr=Math.round(S.rt.reduce((a,r)=>a+S.inv[r.id][0].ch.ctrip.price*(r.total-S.inv[r.id][0].pms),0)/Math.max(sold,1));
+  const lastAuto=S.logs.find(l=>l.actor.startsWith('系统')&&l.canRollback&&l.action==='关房');
   return `
   ${lastAuto?`<div class="notice"><p><b>系统紧急关房 ${hhmm(lastAuto.time)}</b>：${esc(lastAuto.target)}。这是唯一会自动执行的操作，如判断有误可回滚。</p><button data-act="goto-log">查看并回滚</button></div>`:''}
   <div class="kpis">
@@ -371,162 +280,244 @@ function vOverview(){
     <div class="kpi"><small>今日出租率（模拟）</small><b>${Math.round(sold/tot*100)}%</b><em>已售 ${sold} / ${tot} 间</em></div>
     <div class="kpi"><small>今日 ADR（模拟）</small><b>¥${adr}</b><em>平均房价</em></div>
   </div>
-  <div class="pills">${['选住云管家',...CH.map(c=>c.name),'竞对价格'].map(n=>`<span class="pill"><span class="dot mock"></span>${n} · 模拟数据</span>`).join('')}</div>
-  <div class="sec-head"><h2>最需要您处理的建议</h2><p>确认前不会改动任何渠道</p></div>
-  ${p.length?`<div class="cards">${p.slice().sort((a,b)=>(a.level==='urgent'?0:1)-(b.level==='urgent'?0:1)).slice(0,4).map(card).join('')}</div>`:'<div class="empty">没有待确认的建议。点右上角“模拟一次巡检”可以生成新情况。</div>'}
+  <div class="pills">${['选住云管家',...chList().map(c=>c.name),'竞对价格'].map(n=>`<span class="pill"><span class="dot mock"></span>${n} · 模拟数据</span>`).join('')}</div>
+  <div class="sec-head"><h2>${can('confirm')?'最需要您处理的建议':'等待管理者确认的建议'}</h2><p>确认前不会改动任何渠道</p></div>
+  ${p.length?`<div class="cards">${p.slice().sort((a,b)=>(a.level==='urgent'?0:1)-(b.level==='urgent'?0:1)).slice(0,4).map(card).join('')}</div>`:`<div class="empty">没有待确认的建议。${can('scan')?'点右上角“模拟一次巡检”可以生成新情况。':''}</div>`}
   ${p.length>4?`<button data-act="goto-queue">查看全部 ${p.length} 条</button>`:''}`;
 }
 function vQueue(){
-  const p=pending(), done=sugs.filter(s=>!['pending','writing'].includes(s.status));
-  return `<div class="sec-head"><h2>待确认 ${p.length} 条</h2><p>紧急 ${thr.urgentMin} 分钟、重要 ${thr.importantMin} 分钟未处理会升级给代理审批人</p></div>
+  const p=pending(), done=S.sugs.filter(s=>s.status!=='pending');
+  return `<div class="sec-head"><h2>待确认 ${p.length} 条</h2><p>${can('confirm')?'':'只有管理者可以确认或驳回 · '}紧急 ${S.thr.urgentMin} 分钟、重要 ${S.thr.importantMin} 分钟未处理会升级给代理审批人</p></div>
   ${p.length?`<div class="cards">${p.map(card).join('')}</div>`:'<div class="empty">全部处理完了。</div>'}
   ${done.length?`<div class="sec-head"><h2>已处理</h2></div><div class="cards">${done.map(card).join('')}</div>`:''}`;
 }
+function isBadCell(rt,cell,s){return (s.open&&s.qty>cell.pms)||(s.open&&(s.price<rt.floor||s.price>rt.cap));}
+function isSpread(c,s,ref){return s.open&&c!=='ctrip'&&ref.open&&Math.abs(s.price-ref.price)/ref.price*100>S.thr.spreadPct&&Math.abs(s.price-ref.price)>S.thr.spreadAbs;}
 function vCalendar(){
-  const days=[...Array(DAYS).keys()];
-  let h=`<div class="sec-head"><h2>房态日历 · 未来 ${DAYS} 天</h2><p>蓝色行是选住云管家可售房，下面是各渠道在售房量和价格</p></div>
+  const days=[...Array(S.days).keys()];
+  let h=`<div class="sec-head"><h2>房态日历 · 未来 ${S.days} 天</h2><p>蓝色行是选住云管家可售房，下面是各渠道在售房量和价格</p></div>
   <div class="legend"><span><i style="background:var(--crit-soft);border:1px solid var(--crit)"></i>超售风险或价格异常</span><span><i style="background:var(--warn-soft);border:1px solid var(--warn)"></i>有空房但关房 / 价格不一致</span></div>
   <div class="scroll"><table class="cal"><thead><tr><th scope="col">房型 / 渠道</th>${days.map(i=>`<th scope="col">${dayLabel(i)}</th>`).join('')}</tr></thead><tbody>`;
-  RT.forEach(rt=>{
-    h+=`<tr class="rt"><th scope="row">${rt.name}<small>共 ${rt.total} 间</small></th>${days.map(i=>`<td>${inv[rt.id][i].pms}<small>可售</small></td>`).join('')}</tr>`;
-    CH.forEach(c=>{h+=`<tr><th scope="row" class="sub">${c.name}</th>${days.map(i=>{
-      const cell=inv[rt.id][i], s=cell.ch[c.id], ref=cell.ch.ctrip;
-      const bad=(s.open&&s.qty>cell.pms)||(s.open&&(s.price<rt.floor||s.price>rt.cap));
-      const warn=(!s.open&&cell.pms>=thr.reopenMin)||(s.open&&c.id!=='ctrip'&&ref.open&&Math.abs(s.price-ref.price)/ref.price*100>thr.spreadPct&&Math.abs(s.price-ref.price)>thr.spreadAbs);
+  S.rt.forEach(rt=>{
+    h+=`<tr class="rt"><th scope="row">${esc(rt.name)}<small>共 ${rt.total} 间</small></th>${days.map(i=>`<td>${S.inv[rt.id][i].pms}<small>可售</small></td>`).join('')}</tr>`;
+    chList().forEach(c=>{h+=`<tr><th scope="row" class="sub">${c.name}</th>${days.map(i=>{
+      const cell=S.inv[rt.id][i], s=cell.ch[c.id], ref=cell.ch.ctrip;
+      const bad=isBadCell(rt,cell,s), warn=(!s.open&&cell.pms>=S.thr.reopenMin)||isSpread(c.id,s,ref);
       return `<td class="${bad?'bad':warn?'warn':''} ${s.open?'':'off'}">${s.open?`${s.qty} 间<small>¥${s.price}</small>`:'关'}</td>`;}).join('')}</tr>`;});
   });
   return h+'</tbody></table></div>';
 }
-let priceDay=0;
 function vPrice(){
-  const opts=[...Array(DAYS).keys()].map(i=>`<option value="${i}" ${i===priceDay?'selected':''}>${dayLabel(i)}</option>`).join('');
-  const rows=RT.map(rt=>{const cell=inv[rt.id][priceDay], ref=cell.ch.ctrip;
-    return `<tr><th scope="row">${rt.name}</th><td>¥${rt.floor}</td><td>¥${rt.cap}</td>${CH.map(c=>{const s=cell.ch[c.id];
+  const opts=[...Array(S.days).keys()].map(i=>`<option value="${i}" ${i===priceDay?'selected':''}>${dayLabel(i)}</option>`).join('');
+  const rows=S.rt.map(rt=>{const cell=S.inv[rt.id][priceDay], ref=cell.ch.ctrip;
+    return `<tr><th scope="row">${esc(rt.name)}</th><td>¥${rt.floor}</td><td>¥${rt.cap}</td>${chList().map(c=>{const s=cell.ch[c.id];
       if(!s.open)return '<td class="status">关房</td>';
-      const bad=s.price<rt.floor||s.price>rt.cap, warn=c.id!=='ctrip'&&ref.open&&Math.abs(s.price-ref.price)/ref.price*100>thr.spreadPct&&Math.abs(s.price-ref.price)>thr.spreadAbs;
+      const bad=s.price<rt.floor||s.price>rt.cap, warn=isSpread(c.id,s,ref);
       return `<td class="${bad?'bad':warn?'warn':''}">¥${s.price}</td>`;}).join('')}</tr>`;}).join('');
-  const crow=comps.map(cp=>{const pct=(cp.t-cp.y)/cp.y*100;
-    return `<tr><th scope="row">${esc(cp.name)}</th><td>${cp.dist} km</td><td>¥${cp.y}</td><td>¥${cp.t}</td><td class="${pct>thr.compPct?'warn':''}">${pct>0?'+':''}${pct.toFixed(1)}%</td><td>${cp.full?'<span class="status open">满房</span>':'<span class="status">有房</span>'}</td></tr>`;}).join('');
+  const crow=S.comps.map(cp=>{const pct=(cp.t-cp.y)/cp.y*100;
+    return `<tr><th scope="row">${esc(cp.name)}</th><td>${cp.dist} km</td><td>¥${cp.y}</td><td>¥${cp.t}</td><td class="${pct>S.thr.compPct?'warn':''}">${pct>0?'+':''}${pct.toFixed(1)}%</td><td>${cp.full?'<span class="status open">满房</span>':'<span class="status">有房</span>'}</td></tr>`;}).join('');
   return `<div class="sec-head"><h2>本店各渠道价格</h2><label class="note">日期 <select id="priceDay">${opts}</select></label></div>
-  <div class="scroll"><table><thead><tr><th>房型</th><th>底价</th><th>封顶价</th>${CH.map(c=>`<th>${c.name}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
-  <p class="note">以携程为基准价，其他渠道相差超过 ${thr.spreadPct}% 且超过 ¥${thr.spreadAbs} 标黄；超出底价/封顶价标红。</p>
-  <div class="sec-head"><h2>竞对 · 今日 高级大床房同档</h2><p>上调超过 ${thr.compPct}% 生成调价建议</p></div>
+  <div class="scroll"><table><thead><tr><th>房型</th><th>底价</th><th>封顶价</th>${chList().map(c=>`<th>${c.name}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div>
+  <p class="note">以携程为基准价，其他渠道相差超过 ${S.thr.spreadPct}% 且超过 ¥${S.thr.spreadAbs} 标黄；超出底价/封顶价标红。</p>
+  <div class="sec-head"><h2>竞对 · 今日 高级大床房同档</h2><p>上调超过 ${S.thr.compPct}% 生成调价建议</p></div>
   <div class="scroll"><table><thead><tr><th>竞对</th><th>距离</th><th>昨日</th><th>今日</th><th>变化</th><th>状态</th></tr></thead><tbody>${crow}</tbody></table></div>`;
 }
 function vAlerts(){
+  const A=S.alerts;
   return `<div class="sec-head"><h2>告警</h2><p>紧急：电话 + 推送；重要：推送；提示：进早报（演示中仅在页面显示）</p></div>
-  ${alerts.length?`<div class="scroll"><table><thead><tr><th>时间</th><th>级别</th><th>内容</th><th>状态</th><th></th></tr></thead><tbody>${alerts.map(a=>`<tr><td>${hhmm(a.time)}</td><td><span class="lvl ${a.level}">${LVL[a.level]}</span></td><td>${esc(a.text)}</td><td class="status ${a.status==='open'?'open':'ok'}">${{open:'未处理',done:'已处理',ignored:'已忽略'}[a.status]}</td><td class="row-actions">${a.status==='open'?`<button class="small" data-act="ack" data-id="${a.id}">已处理</button> <button class="small" data-act="ignore" data-id="${a.id}">忽略</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">暂无告警</div>'}`;
+  ${A.length?`<div class="scroll"><table><thead><tr><th>时间</th><th>级别</th><th>内容</th><th>状态</th><th></th></tr></thead><tbody>${A.map(a=>`<tr><td>${hhmm(a.time)}</td><td><span class="lvl ${a.level}">${LVL[a.level]}</span></td><td>${esc(a.text)}</td><td class="status ${a.status==='open'?'open':'ok'}">${{open:'未处理',done:'已处理',ignored:'已忽略'}[a.status]}</td><td class="row-actions">${a.status==='open'&&can('alert')?`<button class="small" data-act="ack" data-id="${a.id}">已处理</button> <button class="small" data-act="ignore" data-id="${a.id}">忽略</button>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">暂无告警</div>'}`;
 }
 function vOrders(){
-  const orow=orders.map((o,i)=>{const late=o.status==='待确认'&&o.mins>=thr.orderMin, bad=o.status==='未同步到 PMS';
-    return `<tr><td>${o.no}</td><td>${o.ch}</td><td>${o.rt}</td><td>${o.guest}</td><td>${o.stay}</td><td>¥${o.amt}</td><td class="${late||bad?'bad':''}">${o.status}${o.status==='待确认'?` · ${o.mins} 分钟`:''}</td><td class="row-actions">${late||bad||o.status==='待确认'?`<button class="small" data-act="order" data-i="${i}">标记已处理</button>`:''}</td></tr>`;}).join('');
-  const rv=reviews.map(r=>`<article class="card ${r.score<=3?(r.score<=2?'urgent':'important'):''}">
-    <div class="meta"><span>${r.ch}</span><span>${'★'.repeat(r.score)}${'☆'.repeat(5-r.score)}</span><span>${r.time}</span>${r.status==='done'?'<span class="due">已回复</span>':''}</div>
+  const orow=S.orders.map((o,i)=>{const late=o.status==='待确认'&&o.mins>=S.thr.orderMin, bad=o.status==='未同步到 PMS';
+    return `<tr><td>${esc(o.no)}</td><td>${esc(o.ch)}</td><td>${esc(o.rt)}</td><td>${esc(o.guest)}</td><td>${esc(o.stay)}</td><td>¥${o.amt}</td><td class="${late||bad?'bad':''}">${esc(o.status)}${o.status==='待确认'?` · ${o.mins} 分钟`:''}</td><td class="row-actions">${can('order')&&(late||bad||o.status==='待确认')?`<button class="small" data-act="order" data-i="${i}">标记已处理</button>`:''}</td></tr>`;}).join('');
+  const rv=S.reviews.map(r=>`<article class="card ${r.score<=3?(r.score<=2?'urgent':'important'):''}">
+    <div class="meta"><span>${esc(r.ch)}</span><span>${'★'.repeat(r.score)}${'☆'.repeat(5-r.score)}</span><span>${esc(r.time)}</span>${r.status==='done'?'<span class="due">已回复</span>':''}</div>
     <p style="margin:0">${esc(r.text)}</p>
-    ${r.status==='done'?'':r.draft?`<textarea id="draft-${r.id}" aria-label="回复草稿">${esc(r.draft)}</textarea><div class="actions"><button class="primary" data-act="rv-send" data-id="${r.id}">确认发出（演示）</button></div>`:`<div class="actions"><button data-act="rv-draft" data-id="${r.id}">生成回复草稿</button></div>`}</article>`).join('');
-  return `<div class="sec-head"><h2>订单</h2><p>待确认超过 ${thr.orderMin} 分钟或未同步到 PMS 标红</p></div>
+    ${r.status==='done'?`<p class="reason">回复：${esc(r.draft)}</p>`:!can('review')?'':r.draft?`<textarea id="draft-${r.id}" aria-label="回复草稿">${esc(r.draft)}</textarea><div class="actions"><button class="primary" data-act="rv-send" data-id="${r.id}">确认发出（演示）</button></div>`:`<div class="actions"><button data-act="rv-draft" data-id="${r.id}">生成回复草稿</button></div>`}</article>`).join('');
+  return `<div class="sec-head"><h2>订单</h2><p>待确认超过 ${S.thr.orderMin} 分钟或未同步到 PMS 标红</p></div>
   <div class="scroll"><table><thead><tr><th>订单号</th><th>渠道</th><th>房型</th><th>客人</th><th>入住</th><th>金额</th><th>状态</th><th></th></tr></thead><tbody>${orow}</tbody></table></div>
   <div class="sec-head"><h2>新点评</h2><p>回复须人工修改后发出</p></div><div class="cards">${rv}</div>`;
 }
 function vLog(){
-  return `<div class="sec-head"><h2>操作记录</h2><p>每次写入都保存调整前的值，可一键回滚（回滚也需二次验证）</p></div>
-  ${logs.length?`<div class="scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>调整前</th><th>调整后</th><th>结果</th><th></th></tr></thead><tbody>${logs.map(l=>`<tr><td>${hhmm(l.time)}</td><td>${esc(l.actor)}</td><td>${l.action}</td><td>${esc(l.target)}</td><td>${esc(l.before)}</td><td>${esc(l.after)}</td><td class="status ok">${esc(l.result)}</td><td class="row-actions">${l.snap&&!l.rolledBack?`<button class="small" data-act="rollback" data-id="${l.id}">回滚</button>`:l.snap?'<span class="status">已回滚</span>':''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">还没有操作</div>'}`;
+  const L=S.logs;
+  return `<div class="sec-head"><h2>${can('log_all')?'操作记录':'我的操作记录'}</h2><p>谁、什么时间、改了什么都会记下，只能新增不能修改或删除${can('confirm')?'；写入渠道的操作可一键回滚（需二次验证）':''}</p></div>
+  ${L.length?`<div class="scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>调整前</th><th>调整后</th><th>结果</th><th></th></tr></thead><tbody>${L.map(l=>`<tr><td>${fullTime(l.time)}</td><td>${esc(l.actor)}</td><td>${esc(l.action)}</td><td>${esc(l.target)}</td><td>${esc(l.before)}</td><td>${esc(l.after)}</td><td class="status ok">${esc(l.result)}</td><td class="row-actions">${l.canRollback&&can('confirm')?`<button class="small" data-act="rollback" data-id="${l.id}">回滚</button>`:l.hasSnap&&l.rolledBack?'<span class="status">已回滚</span>':''}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">还没有操作</div>'}`;
 }
 function vSettings(){
-  const f=(id,label,unit)=>`<label for="t-${id}">${label}<input id="t-${id}" type="number" min="0" value="${thr[id]}" data-thr="${id}"> </label>`;
-  const ad=Object.values(adapters).map(a=>`<tr><th scope="row">${a.name}</th><td>${a.use}</td><td><span class="pill"><span class="dot mock"></span>${a.mode}</span></td><td><code>${esc(a.api)}</code></td></tr>`).join('');
-  return `<div class="sec-head"><h2>监控阈值</h2><p>修改后下次巡检生效</p></div>
+  const dis=can('settings')?'':'disabled', T=S.thr;
+  const f=(id,label)=>`<label for="t-${id}">${label}<input id="t-${id}" type="number" min="0" value="${T[id]}" data-thr="${id}" ${dis}></label>`;
+  const ad=S.adapters.map(a=>`<tr><th scope="row">${esc(a.name)}</th><td>${esc(a.use)}</td><td><span class="pill"><span class="dot mock"></span>${esc(a.mode)}</span></td><td><code>${esc(a.api)}</code></td></tr>`).join('');
+  return `<div class="sec-head"><h2>监控阈值</h2><p>${can('settings')?'保存后下次巡检生效':'只有管理者可以修改'}</p></div>
   <div class="form">
     ${f('spreadPct','渠道价差告警（%）')}${f('spreadAbs','渠道价差告警（元）')}${f('reopenMin','可售 ≥ N 间但关房时提醒')}${f('compPct','竞对调价幅度提醒（%）')}
     ${f('urgentMin','紧急建议等待（分钟）')}${f('importantMin','重要建议等待（分钟）')}${f('autoCloseMin','超售无人确认自动关房（分钟）')}${f('orderMin','订单待确认告警（分钟）')}
-    <label class="check" for="t-autoClose"><input id="t-autoClose" type="checkbox" ${thr.autoClose?'checked':''}> 允许超售时紧急关房（只关不开、不改价）</label>
+    <label class="check" for="t-autoClose"><input id="t-autoClose" type="checkbox" ${T.autoClose?'checked':''} ${dis}> 允许超售时紧急关房（只关不开、不改价）</label>
   </div>
   <div class="sec-head"><h2>房型底价与封顶价</h2><p>建议价格超出此范围不会生成，确认时也会拦截</p></div>
-  <div class="scroll"><table><thead><tr><th>房型</th><th>房间数</th><th>底价</th><th>封顶价</th></tr></thead><tbody>${RT.map(r=>`<tr><th scope="row">${r.name}</th><td>${r.total}</td><td><input aria-label="${r.name}底价" type="number" value="${r.floor}" data-rt="${r.id}" data-f="floor" style="width:90px"></td><td><input aria-label="${r.name}封顶价" type="number" value="${r.cap}" data-rt="${r.id}" data-f="cap" style="width:90px"></td></tr>`).join('')}</tbody></table></div>
-  <div class="sec-head"><h2>数据源适配器</h2><p>接入真实系统时只替换对应适配器，上层规则和确认流程不变</p></div>
+  <div class="scroll"><table><thead><tr><th>房型</th><th>房间数</th><th>底价</th><th>封顶价</th></tr></thead><tbody>${S.rt.map(r=>`<tr><th scope="row">${esc(r.name)}</th><td>${r.total}</td><td><input aria-label="${esc(r.name)}底价" type="number" value="${r.floor}" data-rt="${r.id}" data-f="floor" style="width:90px" ${dis}></td><td><input aria-label="${esc(r.name)}封顶价" type="number" value="${r.cap}" data-rt="${r.id}" data-f="cap" style="width:90px" ${dis}></td></tr>`).join('')}</tbody></table></div>
+  ${can('settings')?'<div class="actions"><button class="primary" data-act="save-settings">保存设置</button><button data-act="reset-settings">放弃修改</button></div>':''}
+  <div class="sec-head"><h2>数据源适配器</h2><p>接入真实系统时只替换对应适配器，上层规则、确认流程、账号权限不变</p></div>
   <div class="scroll"><table><thead><tr><th>数据源</th><th>用途</th><th>当前状态</th><th>接口</th></tr></thead><tbody>${ad}</tbody></table></div>`;
 }
-const VIEWS={overview:vOverview,queue:vQueue,calendar:vCalendar,price:vPrice,alerts:vAlerts,orders:vOrders,log:vLog,settings:vSettings};
+function vUsers(){
+  if(!U)return '<div class="empty">加载中…</div>';
+  const roleOpts=sel=>Object.entries(U.roles).map(([k,v])=>`<option value="${k}" ${k===sel?'selected':''}>${v}</option>`).join('');
+  const rows=U.users.map(u=>{const self=u.id===me.id;
+    const st=u.disabled?'<span class="status open">已停用</span>':u.locked?'<span class="status open">已锁定</span>':u.mustChange?'<span class="status">待改临时密码</span>':'<span class="status ok">正常</span>';
+    return `<tr><td>${esc(u.username)}${self?' <span class="status">（我）</span>':''}</td><td>${esc(u.name)}</td>
+      <td><select data-urole="${u.id}" aria-label="${esc(u.name)}的角色" ${self?'disabled':''}>${roleOpts(u.role)}</select></td>
+      <td>${st}</td><td>${u.lastLogin?fullTime(u.lastLogin):'从未登录'}</td>
+      <td class="row-actions">${self?'':`<button class="small ${u.disabled?'':'danger'}" data-act="u-toggle" data-id="${u.id}" data-dis="${u.disabled?0:1}">${u.disabled?'启用':'停用'}</button> `}<button class="small" data-act="u-reset" data-id="${u.id}">${u.locked?'解锁并重置密码':'重置密码'}</button></td></tr>`;}).join('');
+  const log=U.log.map(l=>`<tr><td>${fullTime(l.time)}</td><td>${esc(l.actor)}</td><td>${esc(l.action)}</td><td>${esc(l.target)}</td><td>${esc(l.result)}</td><td><code>${esc(l.ip)}</code></td></tr>`).join('');
+  return `<div class="sec-head"><h2>账号</h2><p>每人一个账号；角色改动、停用、重置密码后，对方会被立即退出登录</p></div>
+  <div class="scroll"><table><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>上次登录</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="sec-head"><h2>新建账号</h2><p>系统生成临时密码，对方第一次登录必须修改</p></div>
+  <form class="form" id="addUser">
+    <label for="nu-u">用户名<input id="nu-u" required autocapitalize="off" placeholder="如 zhangsan" pattern="[A-Za-z0-9_.\\-]{3,32}" title="3 到 32 位字母、数字或 _ . -"></label>
+    <label for="nu-n">姓名<input id="nu-n" required maxlength="20" placeholder="如 张三"></label>
+    <label for="nu-r">角色<select id="nu-r">${roleOpts('front')}</select></label>
+    <div style="align-self:end"><button class="primary" type="submit">新建账号</button></div>
+  </form>
+  <div class="sec-head"><h2>角色能做什么</h2></div>
+  <div class="scroll"><table><thead><tr><th>功能</th><th>管理者</th><th>前台</th><th>只读</th></tr></thead><tbody>
+    <tr><td>查看总览、房态、价格、订单、点评</td><td>✓</td><td>✓</td><td>✓</td></tr>
+    <tr><td>处理告警、订单，回复点评，手动巡检</td><td>✓</td><td>✓</td><td>—</td></tr>
+    <tr><td>确认 / 驳回上架、调价、开关房，回滚（需再次输入登录密码）</td><td>✓</td><td>—</td><td>—</td></tr>
+    <tr><td>修改阈值、底价、封顶价，紧急关房开关</td><td>✓</td><td>—</td><td>—</td></tr>
+    <tr><td>操作记录</td><td>全部</td><td>只看自己</td><td>—</td></tr>
+    <tr><td>账号管理</td><td>✓</td><td>—</td><td>—</td></tr></tbody></table></div>
+  <div class="sec-head"><h2>登录与账号日志</h2><p>最近 100 条，包括登录失败、账号锁定、越权尝试</p></div>
+  ${log?`<div class="scroll"><table><thead><tr><th>时间</th><th>操作人</th><th>动作</th><th>对象</th><th>结果</th><th>IP</th></tr></thead><tbody>${log}</tbody></table></div>`:'<div class="empty">暂无记录</div>'}`;
+}
+async function loadUsers(){try{U=await api('users');if(tab==='users')render();}catch(e){toast(e.message);}}
+
+const VIEWS={overview:vOverview,queue:vQueue,calendar:vCalendar,price:vPrice,alerts:vAlerts,orders:vOrders,log:vLog,settings:vSettings,users:vUsers};
 function render(soft){
+  if(!S)return;
   renderTabs();
-  if(soft&&(tab==='settings'||modalOpen))return;
+  $('lastScan').textContent=S.lastScan?`上次巡检 ${hhmm(S.lastScan)}`:'';
+  if(soft&&(modalOpen||tab==='settings'||tab==='users'||(tab==='orders'&&document.activeElement&&document.activeElement.tagName==='TEXTAREA')))return;
   const y=window.scrollY;
-  document.getElementById('view').innerHTML=VIEWS[tab]();
+  $('view').innerHTML=VIEWS[tab]();
   if(soft)window.scrollTo(0,y);
-  document.getElementById('lastScan').textContent=lastScan?`上次巡检 ${hhmm(lastScan)}`:'';
 }
 
-/* ================= 确认弹窗 ================= */
-let modalOpen=false;
-function closeModal(){modalOpen=false;document.getElementById('modalRoot').innerHTML='';render();}
-function openModal(mode,s,l){
+/* ================= 弹窗 ================= */
+function closeModal(){modalOpen=false;$('modalRoot').innerHTML='';render();}
+function modal(title,body,okText,okClass){
   modalOpen=true;
-  const needPin=mode!=='reject';
+  $('modalRoot').innerHTML=`<div class="overlay" data-act="m-cancel"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <h3>${esc(title)}</h3>${body}<p class="err" id="m-err"></p>
+    <div class="actions" style="justify-content:flex-end">${okText?'<button data-act="m-cancel">取消</button>':''}<button class="${okClass||'primary'}" id="m-ok">${okText||'知道了'}</button></div></div></div>`;
+}
+const PIN=`<label class="note" for="m-pin">二次验证：请再输入一次您的登录密码<input id="m-pin" type="password" autocomplete="current-password"></label>`;
+function openModal(mode,s,l){
   const title={confirm:'确认执行',edit:'修改后确认',reject:'驳回建议',rollback:'确认回滚'}[mode];
   let body='';
   if(mode==='rollback')body=`<dl><dt>对象</dt><dd>${esc(l.target)}</dd><dt>当前</dt><dd>${esc(l.after)}</dd><dt>恢复为</dt><dd><b>${esc(l.before)}</b></dd></dl>`;
   else{
     body=`<dl><dt>对象</dt><dd>${esc(targetText(s))}</dd><dt>动作</dt><dd>${KIND[s.kind]}</dd><dt>调整前</dt><dd>${esc(s.before)}</dd><dt>调整后</dt><dd>${mode==='edit'?`<input id="m-val" type="number" value="${s.patch[s.editable]}" aria-label="新数值"> ${s.editable==='price'?'元':'间'}`:`<b>${esc(s.after)}</b>`}</dd><dt>原因</dt><dd>${esc(s.reason)}</dd></dl>`;
-    if(mode==='edit')body+=s.editable==='price'?`<p class="note">允许范围 ¥${rtOf(s.rt).floor} – ¥${rtOf(s.rt).cap}</p>`:`<p class="note">不能超过选住云管家可售 ${adapters.pms.getAvailability(s.rt,s.di)} 间</p>`;
-    if(mode==='reject')body+=`<label class="note" for="m-reason">驳回原因<select id="m-reason"><option>判断不同，不需要调整</option><option>已在 OTA 后台手动处理</option><option>数据有误</option><option>其他</option></select></label>`;
+    if(mode==='edit')body+=s.editable==='price'?`<p class="note">允许范围 ¥${rtOf(s.rt).floor} – ¥${rtOf(s.rt).cap}</p>`:`<p class="note">不能超过选住云管家可售 ${S.inv[s.rt][s.di].pms} 间</p>`;
+    if(mode==='reject')body+=`<label class="note" for="m-reason">驳回原因<select id="m-reason">${S.rejectReasons.map(r=>`<option>${esc(r)}</option>`).join('')}</select></label>`;
   }
-  if(needPin)body+=`<label class="note" for="m-pin">二次验证口令（演示口令 1234）<input id="m-pin" type="password" inputmode="numeric" autocomplete="off"></label>`;
-  document.getElementById('modalRoot').innerHTML=`<div class="overlay" data-act="m-cancel"><div class="modal" role="dialog" aria-modal="true" aria-label="${title}">
-    <h3>${title}</h3>${body}<p class="err" id="m-err"></p>
-    <div class="actions" style="justify-content:flex-end"><button data-act="m-cancel">取消</button><button class="${mode==='reject'?'danger':'primary'}" id="m-ok">${mode==='reject'?'驳回':mode==='rollback'?'回滚':'确认执行'}</button></div></div></div>`;
-  const first=document.getElementById(mode==='edit'?'m-val':needPin?'m-pin':'m-reason');first&&first.focus();
-  document.getElementById('m-ok').onclick=()=>{
-    const err=document.getElementById('m-err');
-    if(needPin&&document.getElementById('m-pin').value!=='1234'){err.textContent='口令不正确。演示口令是 1234。';return;}
-    if(mode==='rollback'){closeModal();rollback(l);return;}
-    if(mode==='reject'){s.status='rejected';s.rejectReason=document.getElementById('m-reason').value;
-      logs.unshift({id:'L'+(++lidN),time:new Date(),actor:'管理者（演示）',action:'驳回',target:targetText(s),before:s.before,after:'未执行',result:s.rejectReason,snap:null,rolledBack:false});
-      alerts.forEach(a=>{if(a.sid===s.id&&a.status==='open')a.status='done';});closeModal();toast('已驳回，渠道未做任何改动');return;}
-    if(mode==='edit'){
-      const v=Math.round(Number(document.getElementById('m-val').value)), rt=rtOf(s.rt);
-      if(s.editable==='price'&&(v<rt.floor||v>rt.cap)){err.textContent=`价格需在 ¥${rt.floor} 到 ¥${rt.cap} 之间。`;return;}
-      if(s.editable==='qty'){const max=adapters.pms.getAvailability(s.rt,s.di);if(!(v>=0&&v<=max)){err.textContent=`房量需在 0 到 ${max} 间之间。`;return;}}
-      s.patch={...s.patch,[s.editable]:v};
-      s.after=s.editable==='price'?`¥${v}`:s.kind==='open'?`开房 · ${v} 间`:`在售 ${v} 间`;
-    }
-    closeModal();execute(s,'管理者（演示）');
+  if(mode!=='reject')body+=PIN;
+  modal(title,body,mode==='reject'?'驳回':mode==='rollback'?'回滚':'确认执行',mode==='reject'?'danger':'primary');
+  const first=$(mode==='edit'?'m-val':mode==='reject'?'m-reason':'m-pin');first&&first.focus();
+  $('m-ok').onclick=async()=>{
+    const err=$('m-err'), btn=$('m-ok');err.textContent='';
+    let path, body={};
+    if(mode==='rollback'){path=`logs/${l.id}/rollback`;body.password=$('m-pin').value;}
+    else if(mode==='reject'){path=`sugs/${s.id}/reject`;body.reason=$('m-reason').value;}
+    else{path=`sugs/${s.id}/confirm`;body.password=$('m-pin').value;if(mode==='edit')body.value=Number($('m-val').value);}
+    if(mode!=='reject'&&!body.password){err.textContent='请输入您的登录密码。';return;}
+    btn.disabled=true;
+    try{const d=await api(path,body);closeModal();toast(d.msg);await refresh();}
+    catch(e){err.textContent=e.message;btn.disabled=false;}
   };
+}
+function showTemp(d,what){
+  modal(what,`<p class="note">账号 <b>${esc(d.username)}</b> 的临时密码（只显示这一次）：</p><div class="temp">${esc(d.tempPassword)}</div>
+    <p class="note">请当面或私信交给本人。对方第一次登录时必须改成自己的密码。</p>`);
+  $('m-ok').onclick=()=>closeModal();$('m-ok').focus();
 }
 
 /* ================= 事件 ================= */
 let toastT;
-function toast(msg){clearTimeout(toastT);let t=document.querySelector('.toast');if(!t){t=document.createElement('div');t.className='toast';t.setAttribute('role','status');document.body.appendChild(t);}t.textContent=msg;t.hidden=false;toastT=setTimeout(()=>{t.hidden=true;},2600);}
-document.addEventListener('click',e=>{
+function toast(msg){clearTimeout(toastT);let t=document.querySelector('.toast');if(!t){t=document.createElement('div');t.className='toast';t.setAttribute('role','status');document.body.appendChild(t);}t.textContent=msg;t.hidden=false;toastT=setTimeout(()=>{t.hidden=true;},3000);}
+function goTab(t){tab=t;try{localStorage.setItem('ota-tab',tab);}catch(err){}render();window.scrollTo(0,0);if(t==='users')loadUsers();}
+document.addEventListener('click',async e=>{
   const tb=e.target.closest('[data-tab]');
-  if(tb){tab=tb.dataset.tab;try{localStorage.setItem('ota-tab',tab);}catch(err){}render();window.scrollTo(0,0);return;}
+  if(tb){goTab(tb.dataset.tab);return;}
+  if(e.target.id==='pwCancel'){startApp();return;}
+  if(e.target.id==='pwLogout'){logout();return;}
   const el=e.target.closest('[data-act]');if(!el)return;
-  const act=el.dataset.act, id=el.dataset.id, s=sugs.find(x=>x.id===id);
-  if(act==='m-cancel'){if(e.target===el)closeModal();return;}
-  if(act==='confirm'||act==='edit'||act==='reject')openModal(act,s);
-  else if(act==='rollback')openModal('rollback',null,logs.find(l=>l.id===id));
-  else if(act==='ack'||act==='ignore'){const a=alerts.find(x=>x.id===id);a.status=act==='ack'?'done':'ignored';render();}
-  else if(act==='goto-log'){tab='log';render();}
-  else if(act==='goto-queue'){tab='queue';render();}
-  else if(act==='order'){orders[Number(el.dataset.i)].status='已处理';render();}
-  else if(act==='rv-draft'){const r=reviews.find(x=>x.id===Number(id));
-    r.draft=r.score<=3?`您好，非常抱歉这次入住给您带来不好的体验。关于您提到的“${r.text.slice(0,12)}…”，我们已安排相关部门检查整改。欢迎您再次入住，届时请联系前台，我们会为您做好安排。`:`感谢您的好评！很高兴您喜欢我们的服务，期待您再次光临。`;render();}
-  else if(act==='rv-send'){const r=reviews.find(x=>x.id===Number(id));r.draft=document.getElementById('draft-'+id).value;r.status='done';toast('回复已标记发出（演示，未连接 OTA）');render();}
+  const a=el.dataset.act, id=el.dataset.id, s=S&&S.sugs.find(x=>x.id===id);
+  if(a==='m-cancel'){if(e.target===el)closeModal();return;}
+  if(a==='confirm'||a==='edit'||a==='reject')openModal(a,s);
+  else if(a==='rollback')openModal('rollback',null,S.logs.find(l=>String(l.id)===id));
+  else if(a==='ack'||a==='ignore')act(`alerts/${id}/${a}`,{});
+  else if(a==='goto-log')goTab('log');
+  else if(a==='goto-queue')goTab('queue');
+  else if(a==='order')act(`orders/${el.dataset.i}/done`,{});
+  else if(a==='rv-draft')act(`reviews/${id}/draft`,{});
+  else if(a==='rv-send')act(`reviews/${id}/send`,{text:$('draft-'+id).value});
+  else if(a==='save-settings'){
+    const thr={autoClose:$('t-autoClose').checked}, rt={};
+    document.querySelectorAll('[data-thr]').forEach(i=>{thr[i.dataset.thr]=i.value;});
+    document.querySelectorAll('[data-rt]').forEach(i=>{(rt[i.dataset.rt]=rt[i.dataset.rt]||{})[i.dataset.f]=i.value;});
+    el.disabled=true;await act('settings',{thr,rt});el.disabled=false;render();
+  }
+  else if(a==='reset-settings')render();
+  else if(a==='u-toggle'){
+    const u=U.users.find(x=>String(x.id)===id), dis=el.dataset.dis==='1';
+    if(dis&&!confirm(`停用 ${u.name}（${u.username}）？对方会被立即退出，之后无法登录。`))return;
+    try{const d=await api(`users/${id}/update`,{disabled:dis});toast(d.msg);}catch(err){toast(err.message);}loadUsers();
+  }
+  else if(a==='u-reset'){
+    const u=U.users.find(x=>String(x.id)===id);
+    if(!confirm(`为 ${u.name}（${u.username}）生成新的临时密码？对方当前的登录会被退出。`))return;
+    try{const d=await api(`users/${id}/reset`,{});showTemp(d,'密码已重置');}catch(err){toast(err.message);}loadUsers();
+  }
 });
-document.addEventListener('change',e=>{
+document.addEventListener('change',async e=>{
   const t=e.target;
   if(t.id==='priceDay'){priceDay=Number(t.value);render();}
-  else if(t.dataset.thr){thr[t.dataset.thr]=Number(t.value);}
-  else if(t.id==='t-autoClose'){thr.autoClose=t.checked;}
-  else if(t.dataset.rt){rtOf(t.dataset.rt)[t.dataset.f]=Number(t.value);}
+  else if(t.dataset.urole){
+    try{const d=await api(`users/${t.dataset.urole}/update`,{role:t.value});toast(d.msg);}catch(err){toast(err.message);}loadUsers();
+  }
 });
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modalOpen)closeModal();});
-document.getElementById('scanBtn').onclick=()=>{perturb();const n=detect();render();toast(n?`巡检完成，新增 ${n} 条建议`:'巡检完成，未发现新问题');};
-function clock(){document.getElementById('clock').textContent=new Date().toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+document.addEventListener('submit',async e=>{
+  e.preventDefault();
+  const f=e.target, btn=f.querySelector('[type=submit]');
+  if(f.id==='loginForm'){
+    btn.disabled=true;
+    try{const d=await api('login',{username:$('lg-u').value,password:$('lg-p').value});me=d.me;me.mustChange?showAuth('change'):startApp();}
+    catch(err){$('lg-err').textContent=err.message;btn.disabled=false;$('lg-p').select();}
+  }else if(f.id==='pwForm'){
+    const err=$('pw-err');
+    if($('pw-n').value!==$('pw-n2').value){err.textContent='两次输入的新密码不一样。';return;}
+    btn.disabled=true;
+    try{const d=await api('password',{old:$('pw-o').value,new:$('pw-n').value});me=d.me;toast('密码已修改');startApp();}
+    catch(x){if(!$('auth').hidden&&$('pw-err')){$('pw-err').textContent=x.message;btn.disabled=false;}}
+  }else if(f.id==='addUser'){
+    btn.disabled=true;
+    try{const d=await api('users',{username:$('nu-u').value.trim(),name:$('nu-n').value.trim(),role:$('nu-r').value});showTemp(d,'账号已创建');}
+    catch(x){toast(x.message);}
+    btn.disabled=false;loadUsers();
+  }
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&modalOpen)closeModal();
+  if(e.key==='Enter'&&modalOpen&&(e.target.id==='m-pin'||e.target.id==='m-val')){e.preventDefault();$('m-ok').click();}
+});
+$('scanBtn').onclick=()=>act('scan',{});
+$('pwBtn').onclick=()=>showAuth('change');
+$('logoutBtn').onclick=logout;
+function clock(){$('clock').textContent=new Date().toLocaleString('zh-CN',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 
-detect();render();clock();
-setInterval(clock,1000);
-setInterval(tick,30000);
-setInterval(()=>{const n=detect();if(n){render(true);toast(`自动巡检发现 ${n} 条新建议`);}},5*60000);
+clock();setInterval(clock,1000);
+setInterval(()=>{if(me&&!me.mustChange&&S&&!document.hidden)refresh(true).catch(()=>{});},10000);
+api('me').then(d=>{me=d.me;me.mustChange?showAuth('change'):startApp();}).catch(e=>{if($('auth').hidden)showAuth('login',e.message);});
 </script>
 
 </html>

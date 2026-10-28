@@ -2,36 +2,62 @@
 
 7×24 小时盯住携程、美团、飞猪等 OTA 渠道的房态、价格、订单和点评，发现问题即时告警并给出调价/上下架建议。**开房、上架、调价必须由管理者确认后才执行**；唯一例外是超售风险下的紧急关房（只关不开、不改价，可在设置中关闭）。
 
-当前阶段：**框架演示，全部使用模拟数据**，未连接选住云管家（PMS）或任何 OTA。
+当前阶段：**账号与权限是真实功能；盯盘数据仍是模拟的**，未连接选住云管家（PMS）或任何 OTA。
 
 ## 目录
 
 | 路径 | 内容 |
 | --- | --- |
-| `index.html` | 可操作的前端框架原型，双击用浏览器打开即可 |
-| `docs/需求文档.md` | 需求文档（背景目标、角色权限、对接范围、功能、确认流程、告警、非功能需求、验收） |
+| `index.html` | 前端页面：登录、盯盘各页面、账号管理 |
+| `server/app.py` | 后台（仅用 Python 3.10+ 标准库）：账号、角色、会话、权限检查、操作记录、模拟盯盘数据 |
+| `deploy/` | Nginx 站点配置、systemd 服务文件 |
+| `docs/需求文档.md` | 需求文档 |
 
-## 原型功能
+## 账号与角色
 
-- 盯盘总览、待确认、房态日历（14 天）、价格与竞对、告警、订单与点评、操作记录、设置与数据源
-- 监控规则：超售风险、有空房却关房、价格超出底价/封顶价、渠道间价格不一致、竞对大幅调价
-- 人工确认：确认 / 修改后确认 / 驳回，二次验证口令（演示口令 `1234`），写入后回读核对，操作留痕，一键回滚
-- 超时升级与紧急关房；阈值、底价、封顶价可在设置页修改
-- 点右上角“模拟一次巡检”可制造新的异常情况
+| 功能 | 管理者 | 前台 | 只读 |
+| --- | :-: | :-: | :-: |
+| 查看总览、房态、价格、订单、点评 | ✓ | ✓ | ✓ |
+| 处理告警、订单，回复点评，手动巡检 | ✓ | ✓ | — |
+| 确认 / 驳回上架、调价、开关房，回滚（需再次输入登录密码） | ✓ | — | — |
+| 修改阈值、底价、封顶价，紧急关房开关 | ✓ | — | — |
+| 操作记录 | 全部 | 只看自己 | — |
+| 账号管理（新建、改角色、停用、重置密码） | ✓ | — | — |
+
+- 每个接口都在后台检查权限，页面上隐藏按钮只是为了好用。
+- 密码用 scrypt 加盐保存；新账号和重置后的账号必须先改临时密码。
+- 连续 5 次密码错误锁定 15 分钟；闲置 2 小时或登录满 12 小时自动退出。
+- 改角色、停用、重置密码后，对方立即被退出登录。
+- 操作记录在数据库层面只能新增，不能修改或删除。
+- 登录失败、账号锁定、越权尝试都记入「登录与账号日志」。
+
+## 部署（Ubuntu 22.04）
+
+```bash
+useradd --system --no-create-home --shell /usr/sbin/nologin hotelota
+mkdir -p /opt/hotel-ota/data && chown hotelota:hotelota /opt/hotel-ota/data && chmod 700 /opt/hotel-ota/data
+cp server/app.py /opt/hotel-ota/
+cp deploy/hotel-ota.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now hotel-ota
+cp index.html /var/www/hotel-ota/ && cp -r docs /var/www/hotel-ota/
+cp deploy/nginx-hotel-ota.conf /etc/nginx/sites-available/hotel-ota && nginx -t && systemctl reload nginx
+```
+
+命令行管理账号（在服务器上运行）：
+
+```bash
+cd /opt/hotel-ota
+sudo -u hotelota python3 -I app.py adduser zhangsan front 张三   # 角色：admin / front / viewer
+sudo -u hotelota python3 -I app.py resetpw zhangsan              # 忘记密码或被锁定时
+sudo -u hotelota python3 -I app.py users
+```
 
 ## 接入真实数据
 
-`index.html` 中的 `adapters` 对象是数据适配器层，接入时只替换对应适配器，上层监控规则和确认流程不变：
-
-| 适配器 | 数据源 | 接口 |
-| --- | --- | --- |
-| `pms` | 选住云管家 | `getAvailability(房型, 日期)` |
-| `ota` | 携程 / 美团 / 飞猪 | `read(渠道, 房型, 日期)` · `push(渠道, 房型, 日期, 变更)` |
-| `comp` | 竞对价格服务 | `getRates(竞对列表)` |
-| `notify` | 电话、企业微信、短信 | `send(级别, 内容, 接收人)` |
+`server/app.py` 里「数据适配器」的几个函数（`pms_availability`、`ota_read`、`ota_push`）换成真实接口即可，监控规则、确认流程、账号权限不变。
 
 ## 限制
 
-- 纯前端演示，没有后台服务，刷新页面数据会重置
-- 通知只在页面内提示，不会真实发送
-- 真正 24 小时运行需要后台服务，以及与选住云管家、各 OTA（或渠道管理器）的接口对接
+- 还没有 HTTPS：上真实数据前必须先上（需要域名和 ICP 备案）。
+- 二次验证目前是再输一次登录密码；以后可以换成短信或企业微信验证码。
+- 通知只在页面内提示，不会真实发送。
+- 模拟数据每天零点重置（阈值和底价/封顶价会保留）。

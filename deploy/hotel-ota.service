@@ -1,0 +1,19 @@
+[Unit]
+Description=Hotel OTA monitor backend
+After=network.target
+
+[Service]
+User=hotelota
+Group=hotelota
+WorkingDirectory=/opt/hotel-ota
+ExecStart=/usr/bin/python3 -I /opt/hotel-ota/app.py serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/hotel-ota/data
+
+[Install]
+WantedBy=multi-user.target
