@@ -1,0 +1,15 @@
+{
+  "name": "hotel-ota-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "酒店 OTA 24 小时盯盘系统 - 后端服务",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "seed": "node src/db/seed.js --force"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
