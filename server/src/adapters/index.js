@@ -45,7 +45,7 @@ function seedMockData() {
     }
   }
   // 种子订单与点评
-  const guests = ['张*明', '李*华', '王*芳', '刘*强', '陈*静'];
+  const guests = ['张*明', '李*华', '王*芳', '刘*强', '陈*静', '周*杰'];
   for (let i = 0; i < 6; i++) {
     const ch = CHANNELS[i % 3];
     const created = new Date(Date.now() - (i * 17 + 5) * 60000);
