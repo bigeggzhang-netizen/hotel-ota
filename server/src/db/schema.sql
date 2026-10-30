@@ -134,3 +134,68 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_log(created_at);
+
+-- ========== 竞对经营情报与行业对标 ==========
+
+CREATE TABLE IF NOT EXISTS competitors (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL UNIQUE,
+  segment      TEXT,
+  distance_km  REAL,
+  star_rating  REAL,
+  active       INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS data_sources (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL UNIQUE,
+  type          TEXT NOT NULL CHECK (type IN ('commercial','internal','research','public')),
+  license_note  TEXT,
+  reliability   TEXT NOT NULL DEFAULT 'medium' CHECK (reliability IN ('high','medium','low')),
+  active        INTEGER NOT NULL DEFAULT 1,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS competitor_observations (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  competitor_id  INTEGER NOT NULL REFERENCES competitors(id),
+  stay_date      TEXT NOT NULL,
+  channel        TEXT,
+  room_type      TEXT,
+  price          REAL,
+  sold_out       INTEGER,
+  rating         REAL,
+  review_count   INTEGER,
+  search_rank    INTEGER,
+  promotion      TEXT,
+  source_id      INTEGER NOT NULL REFERENCES data_sources(id),
+  observed_at    TEXT NOT NULL,
+  confidence     TEXT NOT NULL CHECK (confidence IN ('high','medium','low')),
+  data_kind      TEXT NOT NULL DEFAULT 'fact' CHECK (data_kind IN ('fact','estimate','unknown')),
+  UNIQUE (competitor_id, stay_date, channel, room_type, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_comp_obs_date ON competitor_observations(stay_date, competitor_id);
+
+CREATE TABLE IF NOT EXISTS market_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  event_type  TEXT NOT NULL,
+  start_date  TEXT NOT NULL,
+  end_date    TEXT NOT NULL,
+  impact      TEXT NOT NULL DEFAULT 'medium' CHECK (impact IN ('high','medium','low')),
+  source_id   INTEGER REFERENCES data_sources(id),
+  detail      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS field_research (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  competitor_id  INTEGER NOT NULL REFERENCES competitors(id),
+  research_date  TEXT NOT NULL,
+  topic          TEXT NOT NULL,
+  finding        TEXT NOT NULL,
+  evidence_ref   TEXT,
+  confidence     TEXT NOT NULL CHECK (confidence IN ('high','medium','low')),
+  data_kind      TEXT NOT NULL DEFAULT 'fact' CHECK (data_kind IN ('fact','estimate','unknown')),
+  created_by     INTEGER REFERENCES users(id),
+  created_at     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);

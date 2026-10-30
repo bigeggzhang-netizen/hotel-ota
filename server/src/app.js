@@ -20,6 +20,7 @@ app.use('/api/suggestions', require('./routes/suggestions'));
 app.use('/api/alerts', require('./routes/alerts'));
 app.use('/api/rules', require('./routes/rules'));
 app.use('/api/data', require('./routes/data'));
+app.use('/api/competitors', require('./routes/competitors'));
 app.use('/api/audit', require('./routes/audit'));
 app.use('/api', (req, res) => res.status(404).json({ error: '接口不存在' }));
 

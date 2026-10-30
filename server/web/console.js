@@ -47,6 +47,7 @@ function loading() { app.innerHTML = '<div class="panel empty">正在加载…</
 function renderNav() {
   const tabs = [
     ['dashboard', '总览', true],
+    ['competitors', '竞对分析', can('monitor:view')],
     ['suggestions', '待确认建议', can('dashboard:view')],
     ['alerts', '告警中心', can('alert:handle') || can('alert:handle:order') || can('alert:handle:review')],
     ['users', '账户与权限', can('user:manage')],
@@ -60,10 +61,11 @@ function renderNav() {
 async function showTab(tab) {
   state.tab = tab;
   renderNav();
-  title.textContent = { dashboard: '总览', suggestions: '建议与确认', alerts: '告警中心', users: '账户与权限', rules: '规则设置', audit: '操作审计' }[tab];
+  title.textContent = { dashboard: '总览', competitors: '竞对分析', suggestions: '建议与确认', alerts: '告警中心', users: '账户与权限', rules: '规则设置', audit: '操作审计' }[tab];
   loading();
   try {
     if (tab === 'dashboard') await renderDashboard();
+    if (tab === 'competitors') await renderCompetitorAnalysis();
     if (tab === 'suggestions') await renderSuggestions();
     if (tab === 'alerts') await renderAlerts();
     if (tab === 'users') await renderUsers();

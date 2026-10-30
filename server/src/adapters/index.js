@@ -85,6 +85,68 @@ CREATE TABLE IF NOT EXISTS mock_reviews (
 
 seedMockData();
 
+function seedCompetitorIntelligence() {
+  const insertCompetitor = db.prepare('INSERT OR IGNORE INTO competitors (name, segment, distance_km, star_rating) VALUES (?,?,?,?)');
+  insertCompetitor.run('如家商旅酒店', '中端商旅', 0.8, 4.6);
+  insertCompetitor.run('汉庭优佳酒店', '经济型', 1.2, 4.5);
+  insertCompetitor.run('亚朵轻居酒店', '中高端', 1.5, 4.7);
+  const insertSource = db.prepare('INSERT OR IGNORE INTO data_sources (name, type, license_note, reliability) VALUES (?,?,?,?)');
+  insertSource.run('示例商用数据库', 'commercial', '模拟商用授权；真实接入前核查衍生分析权限', 'high');
+  insertSource.run('项目内部知识库', 'internal', '本店建议、执行与效果复盘数据', 'high');
+  insertSource.run('一手调研采集', 'research', '人工电话、实地或神秘顾客调研', 'medium');
+  insertSource.run('公开宏观数据', 'public', '公开日历、文旅、交通与活动信息', 'medium');
+  if (db.prepare('SELECT COUNT(*) AS count FROM competitor_observations').get().count > 0) return;
+
+  const competitors = db.prepare('SELECT * FROM competitors WHERE active = 1 ORDER BY id').all();
+  const commercial = db.prepare(`SELECT id FROM data_sources WHERE type = 'commercial' ORDER BY id LIMIT 1`).get();
+  const publicSource = db.prepare(`SELECT id FROM data_sources WHERE type = 'public' ORDER BY id LIMIT 1`).get();
+  const insertObservation = db.prepare(`INSERT INTO competitor_observations
+    (competitor_id, stay_date, channel, room_type, price, sold_out, rating, review_count, search_rank, promotion, source_id, observed_at, confidence)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const basePrices = [389, 359, 469];
+  const ratings = [4.6, 4.5, 4.7];
+  const now = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    for (let d = -14; d < 14; d++) {
+      const date = new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
+      competitors.forEach((competitor, ci) => {
+        ROOM_TYPES.forEach((roomType, ri) => {
+          CHANNELS.forEach((channel, chi) => {
+            if ((d + ci + chi + ri + 50) % 17 === 0) return;
+            const roomOffset = ri === 0 ? 0 : ri === 1 ? 30 : 130;
+            const trend = Math.floor((d + 14) / 7) * 5;
+            const price = basePrices[ci] + roomOffset + trend + ((d * 3 + chi * 5 + ri * 2 + 50) % 17);
+            const soldOut = d >= 0 && (d + ci) % 9 === 8 ? 1 : 0;
+            const promotion = (d + ci + chi + 50) % 7 === 0 ? '平台满减 ¥30' : (d + ri + 50) % 11 === 0 ? '连住优惠' : null;
+            insertObservation.run(
+              competitor.id, date, channel, roomType, price, soldOut,
+              ratings[ci], 800 + ci * 530 + Math.max(0, d) * 3,
+              2 + ((ci * 2 + chi + 50) % 8), promotion, commercial.id, now,
+              (d + ci + 50) % 7 === 0 ? 'medium' : 'high',
+            );
+          });
+        });
+      });
+    }
+    const insertEvent = db.prepare('INSERT INTO market_events (name, event_type, start_date, end_date, impact, source_id, detail) VALUES (?,?,?,?,?,?,?)');
+    const dateAt = days => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+    insertEvent.run('周末商旅需求', 'calendar', dateAt(5), dateAt(6), 'medium', publicSource.id, '周末休闲客群可能增加，关注提前售罄天数');
+    insertEvent.run('城市行业展会', 'exhibition', dateAt(7), dateAt(9), 'high', publicSource.id, '展会期间商圈需求可能上升，需结合竞对满房率验证');
+    insertEvent.run('节假日出行高峰', 'holiday', dateAt(20), dateAt(22), 'high', publicSource.id, '提前检查价格与库存，不直接等同于实际入住率');
+    const insertResearch = db.prepare('INSERT INTO field_research (competitor_id, research_date, topic, finding, evidence_ref, confidence, data_kind) VALUES (?,?,?,?,?,?,?)');
+    insertResearch.run(competitors[0].id, dateAt(-1), '设施与服务', '调研记录：早餐供应至 10:30，近期完成部分客房翻新', '示例访谈记录 R-001', 'high', 'fact');
+    insertResearch.run(competitors[2].id, dateAt(-2), '客群判断', '调研推算：周末亲子客群占比可能高于工作日', '示例调研记录 R-002', 'medium', 'estimate');
+    insertResearch.run(competitors[1].id, dateAt(-3), '真实经营数据', '竞对真实 PMS 入住率、ADR、RevPAR 未获取，保持未知', null, 'low', 'unknown');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+seedCompetitorIntelligence();
+
 // ---------- PMS 适配器（选住云管家，现阶段模拟） ----------
 const pms = {
   name: '选住云管家(模拟)',
@@ -125,8 +187,12 @@ const comp = {
     const names = list && list.length ? list : COMPETITORS;
     const today = new Date().toISOString().slice(0, 10);
     return names.map(name => {
-      const row = db.prepare('SELECT * FROM mock_comp_rates WHERE competitor = ? AND biz_date = ?').get(name, today);
-      return row ? { competitor: name, price: row.price, soldOut: !!row.sold_out } : { competitor: name, price: null, soldOut: false };
+      const row = db.prepare(`SELECT AVG(o.price) AS price, AVG(o.sold_out) AS sold_out_rate
+        FROM competitor_observations o JOIN competitors c ON c.id = o.competitor_id
+        WHERE c.name = ? AND o.stay_date = ?`).get(name, today);
+      return row && row.price != null
+        ? { competitor: name, price: Math.round(row.price), soldOut: row.sold_out_rate >= 0.5, soldOutRate: Math.round(row.sold_out_rate * 100) }
+        : { competitor: name, price: null, soldOut: false, soldOutRate: null };
     });
   },
 };

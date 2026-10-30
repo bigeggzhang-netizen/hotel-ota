@@ -38,11 +38,24 @@ npm start
 | `server/src/index.js` | 服务入口与监控调度器 |
 | `server/src/db/` | SQLite Schema、连接与种子数据 |
 | `server/src/middleware/` | 登录会话、角色权限矩阵、数据范围 |
-| `server/src/services/` | 建议、确认回读、回滚、规则、告警和审计 |
-| `server/src/routes/` | 账户、告警、建议、规则、看板和审计 API |
+| `server/src/services/` | 建议、确认回读、回滚、规则、告警、竞对分析和审计 |
+| `server/src/routes/` | 账户、告警、建议、规则、看板、竞对和审计 API |
 | `server/src/adapters/` | PMS、OTA、竞对和通知模拟适配器 |
 | `server/web/` | 零构建的中文 Web 控制台 |
 | `server/data/` | 本地运行数据库（已被 Git 忽略） |
+
+## 竞对经营情报与行业对标
+
+“竞对分析”页把外购商用数据库、自有知识库、一手调研和公开宏观数据统一到同一套数据口径：
+
+- 价格、市场价格指数、满房样本比例、渠道排名、促销、评分、点评量和 27 天趋势。
+- 每条观察记录保存来源、采集时间、置信度、数据性质和授权说明。
+- 覆盖率展示真实数据缺口；事实、推算和未知分开，不用推测值冒充事实。
+- OTA 满房样本比例不代表真实 PMS 入住率；未获取的竞对 PMS 入住率、ADR、RevPAR 明确标记未知。
+- 管理者和收益经理可录入一手调研，调研内容自动写入审计日志。
+- 内部知识库统计建议采纳、执行和回滚情况，为后续效果复盘提供基础。
+
+接口：`GET /api/competitors/analysis?stayDate=YYYY-MM-DD`、`POST /api/competitors/research`。当前四类来源均为模拟数据，接入真实供应商时必须核查 API 授权、衍生分析权限和数据使用范围。
 
 ## 权限与确认流程
 

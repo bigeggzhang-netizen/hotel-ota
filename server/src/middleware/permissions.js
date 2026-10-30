@@ -17,6 +17,7 @@
 //   delegate:manage    设置代理审批人
 //   audit:view         查看审计日志
 //   report:view        看板与报表
+//   competitor:research 录入竞对一手调研（管理者/收益经理）
 
 const ROLE_MATRIX = {
   manager: [                          // 管理者：全部权限，无限额
@@ -25,14 +26,14 @@ const ROLE_MATRIX = {
     'suggest:confirm', 'suggest:create',
     'rule:edit', 'rule:edit:guardrail',
     'user:manage', 'delegate:manage',
-    'audit:view', 'report:view',
+    'audit:view', 'report:view', 'competitor:research',
   ],
   revenue: [                          // 收益经理：确认受限额约束
     'dashboard:view', 'monitor:view',
     'alert:handle',
     'suggest:confirm:limited', 'suggest:create',
     'rule:edit',
-    'audit:view', 'report:view',
+    'audit:view', 'report:view', 'competitor:research',
   ],
   frontdesk: [                        // 前台值班：只看房态订单，处理订单类告警
     'dashboard:view', 'monitor:room',
