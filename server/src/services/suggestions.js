@@ -55,9 +55,12 @@ function checkPermission(user, perms, s, finalValue) {
   const limited = perms.has('suggest:confirm:limited');
   if (!unlimited && !limited) return { error: '当前角色无确认权限' };
   if (!unlimited && limited && s.action === 'adjust_price') {
-    const before = Number(s.before_value ?? finalValue);
+    const before = Number(s.before_value);
     const after = Number(finalValue);
-    if (before > 0 && Math.abs(after - before) / before > priceChangeLimit()) {
+    if (!Number.isFinite(before) || before <= 0 || !Number.isFinite(after) || after <= 0) {
+      return { error: '缺少有效的调整前后价格，无法校验调价限额' };
+    }
+    if (Math.abs(after - before) / before > priceChangeLimit()) {
       return { error: `超出收益经理单次调价限额 ±${Math.round(priceChangeLimit() * 100)}%（${before} → ${after}），请由管理者确认` };
     }
   }
@@ -167,11 +170,19 @@ async function rollback(user, id) {
     if (!r2.ok) { ok = false; detail = `渠道 ${ch} 房量回滚失败`; break; }
     if (snap.on_sale === 0) await ota.push(ch, s.room_type, s.biz_date, { action: 'close_room' });
     else await ota.push(ch, s.room_type, s.biz_date, { action: 'open_room' });
+    const back = await ota.read(ch, s.room_type, s.biz_date);
+    if (!back || back.price !== snap.price || back.stock !== snap.stock || back.on_sale !== snap.on_sale) {
+      ok = false;
+      detail = `渠道 ${ch} 回滚后回读不一致`;
+      break;
+    }
   }
-  if (ok) detail = '已恢复到调整前的值';
+  if (ok) detail = '已恢复到调整前的值并回读一致';
 
-  db.prepare(`UPDATE suggestions SET status = 'rolled_back', rolled_back_at = datetime('now','localtime'), rolled_back_by = ? WHERE id = ?`)
-    .run(user.id, id);
+  if (ok) {
+    db.prepare(`UPDATE suggestions SET status = 'rolled_back', rolled_back_at = datetime('now','localtime'), rolled_back_by = ? WHERE id = ?`)
+      .run(user.id, id);
+  }
   audit.audit({
     actorId: user.id, actorName: user.display_name, action: 'rollback',
     objectType: 'suggestion', objectId: id, after: { ok, detail },

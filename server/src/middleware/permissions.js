@@ -36,7 +36,7 @@ const ROLE_MATRIX = {
   ],
   frontdesk: [                        // 前台值班：只看房态订单，处理订单类告警
     'dashboard:view', 'monitor:room',
-    'alert:handle:order',
+    'alert:handle:order', 'suggest:create',
   ],
   service: [                          // 客服/点评专员：只看评价，处理评价类
     'dashboard:view', 'monitor:review',

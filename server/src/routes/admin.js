@@ -50,8 +50,14 @@ router.put('/users/:id', (req, res) => {
   const { displayName, role, phone, active, storeIds, channels, password } = req.body || {};
 
   if (role && !VALID_ROLES.includes(role)) return res.status(400).json({ error: '无效角色' });
+  if (password && String(password).length < 6) return res.status(400).json({ error: '密码至少 6 位' });
   if (u.id === req.user.id && active === 0) return res.status(400).json({ error: '不能停用自己的账户' });
   if (u.id === req.user.id && role && role !== 'manager') return res.status(400).json({ error: '不能降低自己的角色' });
+  const removesManager = u.role === 'manager' && u.active === 1 && ((role && role !== 'manager') || active === 0);
+  if (removesManager) {
+    const activeManagers = db.prepare(`SELECT COUNT(*) AS count FROM users WHERE role = 'manager' AND active = 1`).get().count;
+    if (activeManagers <= 1) return res.status(400).json({ error: '系统至少需要保留一名启用中的管理者' });
+  }
 
   db.prepare(`UPDATE users SET display_name = ?, role = ?, phone = ?, active = ?, updated_at = datetime('now','localtime')
               WHERE id = ?`)
@@ -69,7 +75,6 @@ router.put('/users/:id', (req, res) => {
     for (const c of channels) ins.run(u.id, c);
   }
   if (password) {
-    if (String(password).length < 6) return res.status(400).json({ error: '密码至少 6 位' });
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), u.id);
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(u.id); // 重置密码后强制下线
   }

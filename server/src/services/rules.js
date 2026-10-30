@@ -28,7 +28,9 @@ function get(key, fallback = null) {
 }
 
 function getNum(key, fallback = 0) {
-  const v = Number(get(key, fallback));
+  const raw = get(key, fallback);
+  if (raw == null || raw === '') return fallback;
+  const v = Number(raw);
   return Number.isFinite(v) ? v : fallback;
 }
 

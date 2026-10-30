@@ -94,7 +94,7 @@ async function checkPrices() {
     if (vals.length >= 2) {
       const [min, max] = [Math.min(...vals), Math.max(...vals)];
       const diffPct = ((max - min) / min) * 100;
-      if (diffPct > pct && (max - min) > abs) {
+      if (diffPct > pct || (max - min) > abs) {
         raiseAlert({
           level: 'major', type: 'price',
           title: `价格不一致：${rt} 渠道间价差 ¥${max - min}（${diffPct.toFixed(1)}%）`,

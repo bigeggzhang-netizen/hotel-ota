@@ -2,9 +2,21 @@
 const express = require('express');
 const auth = require('../middleware/auth');
 const { ROLE_NAMES, ROLE_MATRIX } = require('../middleware/permissions');
-const db = require('../db/connection');
+const config = require('../config');
 
 const router = express.Router();
+
+router.get('/demo', (req, res) => {
+  if (!config.demoMode) return res.json({ enabled: false });
+  res.json({
+    enabled: true,
+    accounts: [
+      ['管理者', 'admin', 'Admin@123'], ['收益经理', 'revenue', 'Revenue@123'],
+      ['前台', 'frontdesk', 'Frontdesk@123'], ['客服', 'service', 'Service@123'], ['只读', 'viewer', 'Viewer@123'],
+    ],
+    otp: '1234',
+  });
+});
 
 router.post('/login', express.json(), (req, res) => {
   const { username, password } = req.body || {};

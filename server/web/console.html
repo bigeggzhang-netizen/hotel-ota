@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>工作台 · 酒店 OTA 盯盘系统</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="brand-mark small">OTA</span><strong>酒店盯盘系统</strong><span class="env-tag">模拟数据</span></div>
+    <div class="user-menu"><span id="current-user"></span><button id="logout" class="ghost">退出</button></div>
+  </header>
+  <nav id="main-nav" class="main-nav" aria-label="功能导航"></nav>
+  <main class="workspace">
+    <div class="page-heading"><div><p class="eyebrow">实时工作台</p><h1 id="page-title">总览</h1></div><button id="refresh" class="ghost">刷新</button></div>
+    <div id="app" aria-live="polite"></div>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/console.js"></script>
+</body>
+</html>

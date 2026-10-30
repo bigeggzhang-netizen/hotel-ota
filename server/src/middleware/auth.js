@@ -28,15 +28,17 @@ function createSession(res, userId, req) {
   const token = newToken();
   db.prepare('INSERT INTO sessions (token, user_id, expires_at, ip) VALUES (?,?,?,?)')
     .run(token, userId, nowPlus(config.sessionTtlMs), clientIp(req));
+  const secure = config.cookieSecure ? '; Secure' : '';
   res.setHeader('Set-Cookie',
-    `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(config.sessionTtlMs / 1000)}`);
+    `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(config.sessionTtlMs / 1000)}${secure}`);
   return token;
 }
 
 function destroySession(req, res) {
   const token = parseCookies(req).sid;
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-  res.setHeader('Set-Cookie', 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  const secure = config.cookieSecure ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
 }
 
 /** 登录：含失败锁定。返回 { ok, user?, error? } */
@@ -87,7 +89,7 @@ function requireAuth(req, res, next) {
   // 代理审批人：在授权时间段内获得确认权限
   if (!req.perms.has('suggest:confirm') && !req.perms.has('suggest:confirm:limited')) {
     const dlg = db.prepare(
-      `SELECT d.* FROM delegates d WHERE d.delegate_id = ? AND d.start_at <= datetime('now','localtime') AND d.end_at >= datetime('now','localtime')`
+      `SELECT d.* FROM delegates d WHERE d.delegate_id = ? AND julianday(d.start_at) <= julianday('now') AND julianday(d.end_at) >= julianday('now')`
     ).get(user.id);
     if (dlg) {
       req.perms.add('suggest:confirm');
